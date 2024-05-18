@@ -1,2 +1,5 @@
-* Make it possible to input several table_stab.
-* Add drawdown at specific point.
+* Make a function that takes arbitrary lenght arrays of each variable and returns a
+    product, containing pitflow objects of all of them
+* Pretty printout
+* Pretty html printout
+* printout into excel/csv
