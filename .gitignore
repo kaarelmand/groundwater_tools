@@ -1,6 +1,6 @@
 *.png
 *.ipynb
 todo.txt
-__pycache__/*
-.pytest_cache/*
+__pycache__/
+.pytest_cache/
 .vscode/*
