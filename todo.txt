@@ -1,5 +1,6 @@
-* Make a function that takes arbitrary lenght arrays of each variable and returns a
-    product, containing pitflow objects of all of them
-* Pretty printout
-* Pretty html printout
-* printout into excel/csv
+* Make a function that takes arbitrary length arrays of each variable and returns a
+    product, containing PitFlow objects of all of them
+* add precipitation inflow and zone1 + precip
+
+* upload to github
+* package
