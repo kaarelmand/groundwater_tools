@@ -3,9 +3,13 @@ from scipy import optimize
 import pandas as pd
 from functools import cached_property
 
-DAY_TO_SEC = 24 * 60 * 60
-YEAR_TO_SEC = 365.25 * 24 * 60 * 60
+MINUTE_TO_SEC = 60
+HOUR_TO_SEC = 60 * MINUTE_TO_SEC
+DAY_TO_SEC = 24 * HOUR_TO_SEC
+YEAR_TO_SEC = 365.25 * DAY_TO_SEC
+QUARTER_TO_SEC = YEAR_TO_SEC / 4
 M_TO_MM = 1000
+M3_TO_L = 1000
 
 
 class PitFlow:
@@ -20,11 +24,11 @@ class PitFlow:
         "drawdown_edge": ("Height of inflow at pit edge", "m"),
         "depth_pitlake": ("Water depth in the pit lake", "m"),
         "area": ("Area of pit", "m^2"),
-        "recharge": ("Recharge", "m/s"),
-        "precipitation": ("Precipitation", "m/s"),
-        "period_snow_accumulation": ("Duration of snow accumulation in Winter", "s"),
-        "period_melting": ("Duration of snow melt in Spring", "s"),
-        "cond_h": ("Hydraulic conductivity (horizontal)", "m/s"),
+        "recharge": ("Recharge", "m/sec"),
+        "precipitation": ("Precipitation", "m/sec"),
+        "period_snow_accumulation": ("Duration of snow accumulation in Winter", "sec"),
+        "period_melting": ("Duration of snow melt in Spring", "sec"),
+        "cond_h": ("Hydraulic conductivity (horizontal)", "m/sec"),
         "anisotropy": ("Anisotropy of hydraulic conductivity", ""),
     }
     _outputs_info = {
@@ -32,16 +36,16 @@ class PitFlow:
         "radius_infl": ("Radius of influence from pit centre", "m"),
         "radius_infl_from_edge": ("Radius of influence from pit edge", "m"),
         "radius_at_1m": ("Radius at drawdown of 1 m, from pit edge", "m"),
-        "inflow_zone1": ("Zone 1 inflow", "m^3/s"),
-        "inflow_zone2": ("Zone 2 inflow", "m^3/s"),
-        "inflow_zones_both": ("Zone 1 and 2 inflow", "m^3/s"),
-        "inflow_precipitation": ("Inflow from precipitation in pit", "m^3/s"),
+        "inflow_zone1": ("Zone 1 inflow", "m^3/sec"),
+        "inflow_zone2": ("Zone 2 inflow", "m^3/sec"),
+        "inflow_zones_both": ("Zone 1 and 2 inflow", "m^3/sec"),
+        "inflow_precipitation": ("Inflow from precipitation in pit", "m^3/sec"),
         "inflow_precipitation_zone1": (
             "Inflow from zone 1 and precipitation in pit",
-            "m^3/s",
+            "m^3/sec",
         ),
-        "inflow_meltwater": ("Inflow from meltwater", "m^3/s"),
-        "inflow_meltwater_zone1": ("Inflow from zone 1 and meltwater", "m^3/s"),
+        "inflow_meltwater": ("Inflow from meltwater", "m^3/sec"),
+        "inflow_meltwater_zone1": ("Inflow from zone 1 and meltwater", "m^3/sec"),
     }
 
     def __init__(
@@ -81,15 +85,21 @@ class PitFlow:
         )
         return self.drawdown_stab - right_term
 
+    # TODO: test
+    @cached_property
+    def radius_eff(self):
+        """Find effective (circular) radius using area (m)."""
+        return np.sqrt(self.area / np.pi)
+
     @cached_property
     def radius_infl(self, radius_start=10000):
-        """Find optimum drawdown radius through the Marinelli and Niccoli 2000
+        """Find optimum drawdown radius (m) through the Marinelli and Niccoli 2000
         formula."""
         return optimize.fsolve(func=self._get_marinelli_niccoli_h_0, x0=radius_start)[0]
 
     @cached_property
     def radius_infl_from_edge(self):
-        """Find optimum drawdown radius from the edge of the pit, not the center."""
+        """Find optimum drawdown radius (m) from the edge of the pit, not the center."""
         return self.radius_infl - self.radius_eff
 
     def get_drawdown_at_r(self, radius_from_wall):
@@ -205,9 +215,10 @@ class PitFlow:
         """Inflow from meltwater in spring and zone 1, i.e. pit walls (m^3/sec)."""
         return self.inflow_meltwater + self.inflow_zone1
 
-    # TODO: add option to change inflow units
-    def report(self, drawdown_points=None):
-        """Convenient report of models inputs and commonly-needed model output values."""
+    # TODO: test conversions
+    def report(self, drawdown_points=None, volume="m^3", rate="sec", sort="False"):
+        """pandas.DataFrame report of model inputs and commonly-needed model
+        outputs."""
         report_table = (
             pd.DataFrame(self._inputs_info | self._outputs_info)
             .T.reset_index()[[0, "index", 1]]
@@ -228,7 +239,37 @@ class PitFlow:
             ),
             columns=["Parameter", "Value", "Unit"],
         )
-        report_table = pd.concat([report_table, drawdown_rows])
+        report_table = pd.concat([report_table, drawdown_rows]).reset_index(drop=True)
+
+        if volume == "m^3":
+            pass
+        elif volume == "l":
+            report_table = unit_convert(report_table, "m^3", "l", M3_TO_L)
+        else:
+            raise (
+                ValueError(
+                    f"'{volume}' not recognized as value for `volume`."
+                    "Needs to be one of 'm^3' or 'l'."
+                )
+            )
+
+        if rate == "sec":
+            pass
+        elif rate == "hr":
+            report_table = unit_convert(report_table, "sec", "hr", HOUR_TO_SEC)
+        elif rate == "day":
+            report_table = unit_convert(report_table, "sec", "day", DAY_TO_SEC)
+        elif rate == "quarter":
+            report_table = unit_convert(report_table, "sec", "quarter", QUARTER_TO_SEC)
+        elif rate == "yr":
+            report_table = unit_convert(report_table, "sec", "yr", YEAR_TO_SEC)
+        else:
+            raise (
+                ValueError(
+                    f"'{rate}' not recognized as value for `time`."
+                    "Needs to be one of 'sec', 'hr', 'day', 'quarter', or 'yr'."
+                )
+            )
 
         return report_table
 
@@ -260,51 +301,78 @@ class PitFlow:
 
 class PitFlowCommonUnits(PitFlow):
     """Same as PitFlow but expects input in more convenient forms:
-    `cond_h_md` (horizontal hydraulic conductivity) in m/d
-    `area` (total pit area) in m^2
     `recharge_mm_yr` in mm/yr
+    `precipitation_mm_yr` in mm/yr
+    `period_snow_accumulation_d` in days
+    `period_melting_d` in days
+    `cond_h_md` (horizontal hydraulic conductivity) in m/day
     """
 
-    _inputs_info = {
-        "cond_h_md": ("Hydraulic conductivity (horizontal)", "m/d"),
-        "recharge_mm_yr": ("Recharge", "mm/yr"),
-        "area": ("Total pit area", "m^2"),
-    } | PitFlow._inputs_info
+    _inputs_info = dict(PitFlow._inputs_info)
+    for param in [
+        "recharge",
+        "precipitation",
+        "period_snow_accumulation",
+        "period_melting",
+        "cond_h",
+    ]:
+        _ = _inputs_info.pop(param)
+    _inputs_info.update(
+        {
+            "recharge_mm_yr": ("Recharge", "mm/yr"),
+            "precipitation_mm_yr": ("Precipitation", "mm/yr"),
+            "period_snow_accumulation_d": (
+                "Duration of snow accumulation in Winter",
+                "day",
+            ),
+            "period_melting_d": ("Duration of snow melt in Spring", "day"),
+            "cond_h_md": ("Hydraulic conductivity (horizontal)", "m/day"),
+        }
+    )
 
     def __init__(
         self,
-        cond_h_md,
-        recharge_mm_yr,
-        area,
         drawdown_stab,
+        area,
+        recharge_mm_yr,
+        precipitation_mm_yr,
+        cond_h_md,
         anisotropy=1,
         drawdown_edge=0,
         depth_pitlake=0,
+        period_snow_accumulation_d=90,
+        period_melting_d=14,
     ):
-        self.cond_h_md = cond_h_md
         self.recharge_mm_yr = recharge_mm_yr
-        self.area = area
+        self.precipitation_mm_yr = precipitation_mm_yr
+        self.period_snow_accumulation_d = period_snow_accumulation_d
+        self.period_melting_d = period_melting_d
+        self.cond_h_md = cond_h_md
         super().__init__(
             drawdown_stab=drawdown_stab,
-            cond_h=cond_h_md / DAY_TO_SEC,
-            radius_eff=get_effective_radius(area),
-            recharge=recharge_mm_yr / YEAR_TO_SEC / M_TO_MM,
-            anisotropy=anisotropy,
             drawdown_edge=drawdown_edge,
             depth_pitlake=depth_pitlake,
+            area=area,
+            recharge=recharge_mm_yr / YEAR_TO_SEC / M_TO_MM,
+            precipitation=precipitation_mm_yr / YEAR_TO_SEC / M_TO_MM,
+            period_snow_accumulation=self.period_snow_accumulation_d * DAY_TO_SEC,
+            period_melting=self.period_melting_d * DAY_TO_SEC,
+            cond_h=cond_h_md / DAY_TO_SEC,
+            anisotropy=anisotropy,
         )
 
     def __repr__(self):
         fmt_output = f"{self.__class__.__name__}("
         for param in self._inputs_info.keys():
-            if param not in ["recharge", "cond_h", "radius_eff"]:
+            if param not in [
+                "recharge",
+                "precipitation",
+                "period_snow_accumulation",
+                "period_melting",
+                "cond_h",
+            ]:
                 fmt_output += f"\n{param}={getattr(self, param)},"
         return fmt_output + "\n)"
-
-
-def get_effective_radius(area):
-    """Return ideal circularized radius from true area."""
-    return np.sqrt(area / np.pi)
 
 
 def get_nice_intervals(end, num_bounds=(4, 8)):
@@ -326,3 +394,36 @@ def get_nice_intervals(end, num_bounds=(4, 8)):
     elif num < num_bounds[0]:
         num *= 2
     return np.linspace(0, max, num + 1)[1:]
+
+
+# TODO: test
+def unit_convert(df, unit_from, unit_to, coef, unit_col="Unit", value_col="Value"):
+    """Helper function to convert the PitFlow.report() table units.
+
+    Args:
+        df (pd.DataFrame): DataFrame to convert.
+        unit_from (str): unit as exists in the DataFrame.
+        unit_to (str): unit to be converted to.
+        coef (float, int): conversion factor.
+        unit_col (str, optional): Column name that stores units. Defaults to "Unit".
+        value_col (str, optional): Column name that stores values. Defaults to "Value".
+
+    Returns:
+        pd.DataFrame: DataFrame with converted values.
+    """
+    convert_mask = df[unit_col].str.contains(unit_from, regex=False)
+    df.loc[convert_mask, value_col] = df.loc[convert_mask, value_col] * coef
+    df.loc[convert_mask, unit_col] = df.loc[convert_mask, unit_col].str.replace(
+        unit_from, unit_to
+    )
+    return df
+
+
+testpit = PitFlow(
+    drawdown_stab=6,
+    area=40 * 100,
+    recharge=761 / (1000 * 365.25 * 24 * 60 * 60) * 0.1,
+    precipitation=761 / (1000 * 365.25 * 24 * 60 * 60),
+    cond_h=20 / (24 * 60 * 60),
+)
+print(testpit.report(volume="l"))

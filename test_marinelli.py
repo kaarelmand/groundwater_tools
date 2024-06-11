@@ -6,16 +6,18 @@ from marinelli import PitFlow, PitFlowCommonUnits, get_nice_intervals
 
 testpit = PitFlow(
     drawdown_stab=6,
-    cond_h=20 / (24 * 60 * 60),
-    radius_eff=np.sqrt(40 * 100 / np.pi),
+    area=40 * 100,
     recharge=761 / (1000 * 365.25 * 24 * 60 * 60) * 0.1,
+    precipitation=761 / (1000 * 365.25 * 24 * 60 * 60),
+    cond_h=20 / (24 * 60 * 60),
 )
 
 testpit_anisotropic = PitFlow(
     drawdown_stab=6,
-    cond_h=20 / (24 * 60 * 60),
-    radius_eff=np.sqrt(40 * 100 / np.pi),
+    area=40 * 100,
     recharge=761 / (1000 * 365.25 * 24 * 60 * 60) * 0.1,
+    precipitation=761 / (1000 * 365.25 * 24 * 60 * 60),
+    cond_h=20 / (24 * 60 * 60),
     anisotropy=0.1,
 )
 
@@ -24,6 +26,7 @@ testpit_commonunits = PitFlowCommonUnits(
     cond_h_md=20,
     area=40 * 100,
     recharge_mm_yr=761 * 0.1,
+    precipitation_mm_yr=761,
 )
 
 
