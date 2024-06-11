@@ -3,4 +3,4 @@
 todo.txt
 __pycache__/
 .pytest_cache/
-.vscode/*
+.vscode/

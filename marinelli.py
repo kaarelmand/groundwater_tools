@@ -18,38 +18,55 @@ class PitFlow:
     _inputs_info = {
         "drawdown_stab": ("Drawdown in pit center", "m"),
         "drawdown_edge": ("Height of inflow at pit edge", "m"),
+        "depth_pitlake": ("Water depth in the pit lake", "m"),
+        "area": ("Area of pit", "m^2"),
+        "recharge": ("Recharge", "m/s"),
+        "precipitation": ("Precipitation", "m/s"),
+        "period_snow_accumulation": ("Duration of snow accumulation in Winter", "s"),
+        "period_melting": ("Duration of snow melt in Spring", "s"),
         "cond_h": ("Hydraulic conductivity (horizontal)", "m/s"),
         "anisotropy": ("Anisotropy of hydraulic conductivity", ""),
-        "recharge": ("Recharge", "m/s"),
-        "radius_eff": ("Effective radius of pit", "m"),
-        "depth_pitlake": ("Water depth in the pit lake", "m"),
     }
     _outputs_info = {
+        "radius_eff": ("Effective radius of pit", "m"),
         "radius_infl": ("Radius of influence from pit centre", "m"),
         "radius_infl_from_edge": ("Radius of influence from pit edge", "m"),
         "radius_at_1m": ("Radius at drawdown of 1 m, from pit edge", "m"),
         "inflow_zone1": ("Zone 1 inflow", "m^3/s"),
         "inflow_zone2": ("Zone 2 inflow", "m^3/s"),
         "inflow_zones_both": ("Zone 1 and 2 inflow", "m^3/s"),
+        "inflow_precipitation": ("Inflow from precipitation in pit", "m^3/s"),
+        "inflow_precipitation_zone1": (
+            "Inflow from zone 1 and precipitation in pit",
+            "m^3/s",
+        ),
+        "inflow_meltwater": ("Inflow from meltwater", "m^3/s"),
+        "inflow_meltwater_zone1": ("Inflow from zone 1 and meltwater", "m^3/s"),
     }
 
     def __init__(
         self,
         drawdown_stab,
-        cond_h,
-        radius_eff,
+        area,
         recharge,
+        precipitation,
+        cond_h,
         anisotropy=1,
         drawdown_edge=0,
         depth_pitlake=0,
+        period_snow_accumulation=90 * DAY_TO_SEC,
+        period_melting=14 * DAY_TO_SEC,
     ):
         self.drawdown_stab = drawdown_stab
-        self.cond_h = cond_h
-        self.radius_eff = radius_eff
-        self.recharge = recharge
         self.drawdown_edge = drawdown_edge
-        self.anisotropy = anisotropy
         self.depth_pitlake = depth_pitlake
+        self.area = area
+        self.recharge = recharge
+        self.precipitation = precipitation
+        self.period_snow_accumulation = period_snow_accumulation
+        self.period_melting = period_melting
+        self.cond_h = cond_h
+        self.anisotropy = anisotropy
 
     def _get_marinelli_niccoli_h_0(self, radius_infl):
         """Marinelli and Niccoli 2000 formula describing horizontal groundwater flow
@@ -151,12 +168,44 @@ class PitFlow:
             * (self.drawdown_stab - self.depth_pitlake)
         )
 
+    # TODO: test
     @cached_property
     def inflow_zones_both(self):
         """Combined inflow into pit from zones 1 and 2, i.e. pit walls and bottom
         (m^3/sec)."""
         return self.inflow_zone1 + self.inflow_zone2
 
+    # TODO: test
+    @cached_property
+    def inflow_precipitation(self):
+        """Inflow from precipitation into the pit (m^3/sec)."""
+        return self.precipitation * self.area
+
+    # TODO: test
+    @cached_property
+    def inflow_precipitation_zone1(self):
+        """Inflow from precipitation into the pit and zone 1, i.e. pit walls
+        (m^3/sec)."""
+        return self.inflow_precipitation + self.inflow_zone1
+
+    # TODO: test
+    @cached_property
+    def inflow_meltwater(self):
+        """Inflow from meltwater in spring (m^3/sec)."""
+        return (
+            self.precipitation
+            * self.period_snow_accumulation
+            / self.period_melting
+            * self.area
+        )
+
+    # TODO: test
+    @cached_property
+    def inflow_meltwater_zone1(self):
+        """Inflow from meltwater in spring and zone 1, i.e. pit walls (m^3/sec)."""
+        return self.inflow_meltwater + self.inflow_zone1
+
+    # TODO: add option to change inflow units
     def report(self, drawdown_points=None):
         """Convenient report of models inputs and commonly-needed model output values."""
         report_table = (
