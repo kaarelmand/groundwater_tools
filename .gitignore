@@ -4,3 +4,6 @@ todo.txt
 __pycache__/
 .pytest_cache/
 .vscode/
+.venv/
+.pdm-build/
+.pdm-python

@@ -1,0 +1,29 @@
+[project]
+name = "groundwater_tools"
+version = "0.1.0"
+description = "Library for processing groundwater data and constructing simple analytical models."
+authors = [
+    {name = "Kaarel Mänd", email = "kaarel.mand@protonmail.com"},
+]
+dependencies = [
+    "numpy>=2.0.0",
+    "scipy>=1.14.0",
+    "matplotlib>=3.9.1",
+    "pandas>=2.2.2",
+]
+requires-python = ">=3.10"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+
+[tool.pdm]
+distribution = true
+
+[tool.pdm.dev-dependencies]
+test = [
+    "pytest>=8.2.2",
+]

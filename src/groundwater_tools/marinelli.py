@@ -1,7 +1,11 @@
-import numpy as np
-from scipy import optimize
-import pandas as pd
+from collections.abc import MutableMapping
 from functools import cached_property
+from itertools import product
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from scipy import optimize
 
 MINUTE_TO_SEC = 60
 HOUR_TO_SEC = 60 * MINUTE_TO_SEC
@@ -138,30 +142,6 @@ class PitFlow:
         """Radius from wall at which estimated water table drawdown is 1 m."""
         return self.get_r_at_drawdown(1)
 
-    def draw_drawdown_curve(self, ax, line_buffer=(0.15, 1.5), lims=None, **kwargs):
-        """Draw the groundwater drawdown curve on an existing matplotlib axes.
-
-        Args:
-            ax (matplotlib.axes.Axes): Matplotlib axes on which to draw the curve.
-            line_buffer (tuple, optional): Tuple stating how far to extend the curve
-                back from the pit wall and forward past the radius of influence, as
-                relative to the radius of influence. Defaults to (0.15, 1.5).
-            lims (tuple or None, optional): If present, a tuple that overrides
-                `line_buffer` with absolute values. Defaults to None.
-
-        Returns:
-            list of matplotlib.lines.Line2D: a list of lines on the specified matplotlib
-                axes.
-        """
-        if not lims:
-            lims = (
-                -(self.radius_infl_from_edge * line_buffer[0]),
-                self.radius_infl_from_edge * line_buffer[1],
-            )
-        radiuses = np.linspace(*lims, 1000)
-        drawdowns = [self.get_drawdown_at_r(r) for r in radiuses]
-        return ax.plot(radiuses, drawdowns, **kwargs)
-
     @cached_property
     def inflow_zone1(self):
         """Horizontal inflow into pit from zone 1, i.e. pit walls (m^3/s)."""
@@ -215,6 +195,30 @@ class PitFlow:
         """Inflow from meltwater in spring and zone 1, i.e. pit walls (m^3/sec)."""
         return self.inflow_meltwater + self.inflow_zone1
 
+    def draw_drawdown_curve(self, ax, line_buffer=(0.15, 1.5), lims=None, **kwargs):
+        """Draw the groundwater drawdown curve on an existing matplotlib axes.
+
+        Args:
+            ax (matplotlib.axes.Axes): Matplotlib axes on which to draw the curve.
+            line_buffer (tuple, optional): Tuple stating how far to extend the curve
+                back from the pit wall and forward past the radius of influence, as
+                relative to the radius of influence. Defaults to (0.15, 1.5).
+            lims (tuple or None, optional): If present, a tuple that overrides
+                `line_buffer` with absolute values. Defaults to None.
+
+        Returns:
+            list of matplotlib.lines.Line2D: a list of lines on the specified matplotlib
+                axes.
+        """
+        if not lims:
+            lims = (
+                -(self.radius_infl_from_edge * line_buffer[0]),
+                self.radius_infl_from_edge * line_buffer[1],
+            )
+        radii = np.linspace(*lims, 1000)
+        drawdowns = [self.get_drawdown_at_r(r) for r in radii]
+        return ax.plot(radii, drawdowns, **kwargs)
+
     # TODO: test conversions
     def report(self, drawdown_points=None, volume="m^3", rate="sec", sort="False"):
         """pandas.DataFrame report of model inputs and commonly-needed model
@@ -226,7 +230,7 @@ class PitFlow:
         )
         report_table["Value"] = report_table["Value"].apply(lambda x: getattr(self, x))
 
-        if not drawdown_points:
+        if drawdown_points is None:
             drawdown_points = get_nice_intervals(self.radius_infl_from_edge)
         drawdown_rows = pd.DataFrame(
             (
@@ -375,6 +379,102 @@ class PitFlowCommonUnits(PitFlow):
         return fmt_output + "\n)"
 
 
+class PitFlowCollection(MutableMapping):
+    """Methods to show and collect different drawdown scenarios.
+    Pass any of the parameters needed for PitFlow as either a
+    list of parameters or a single numerical parameter. A PitFlow instance is added per
+    each item in the product of all lists. Returns a dict-like PitFlowCollection
+    object, where names are attributes that change."""
+
+    def __init__(self, flowclass=PitFlow, **kwargs):
+        multiples = {}
+        singles = {}
+        for name, val in kwargs.items():
+            if type(val) is list:
+                multiples[name] = val
+            else:
+                singles[name] = val
+        for arg_lst in product(*multiples.values()):
+            instance_params = {
+                param: val for param, val in zip(multiples.keys(), arg_lst)
+            }
+            name_lst = [(f"{param} = {val}") for param, val in instance_params.items()]
+            flow_name = ", ".join(name_lst)
+            self.__dict__[flow_name] = flowclass(**instance_params, **singles)
+
+    def __setitem__(self, key, value):
+        if type(value) != PitFlow:
+            raise TypeError(
+                f"Attempted to set a `{type(value)}` as value."
+                "Values must be of type `PitFlow`."
+            )
+        self.__dict__[key] = value
+
+    def __getitem__(self, key):
+        return self.__dict__[key]
+
+    def __delitem__(self, key):
+        del self.__dict__[key]
+
+    def __iter__(self):
+        return iter(self.__dict__)
+
+    def __len__(self):
+        return len(self.__dict__)
+
+    def draw_drawdown_curves(self, ax, line_buffer=(0.15, 1.5), lims=None, **kwargs):
+        if not lims:
+            max_infl = max(
+                flow.radius_infl_from_edge for flow in self.__dict__.values()
+            )
+            lims = (-(max_infl * line_buffer[0]), max_infl * line_buffer[1])
+        return [
+            flow.draw_drawdown_curve(ax, lims=lims, label=name, **kwargs)
+            for name, flow in self.__dict__.items()
+        ]
+
+    def draw_drawdown_figure(
+        self,
+        ylabel="Water table drawdown, m",
+        xlabel="Distance from pit edge, m",
+        axkwargs=dict(),
+        linekwargs=dict(),
+    ):
+        fig, ax = plt.subplots(**axkwargs)
+        self.draw_drawdown_curves(ax, **linekwargs)
+        ax.invert_yaxis()
+        ax.legend()
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        return fig, ax
+
+    def report(self, drawdown_points=None, **kwargs):
+        if drawdown_points is None:
+            max_infl = max(
+                flow.radius_infl_from_edge for flow in self.__dict__.values()
+            )
+            drawdown_points = get_nice_intervals(max_infl)
+
+        reports = []
+        for i, flow in enumerate(self.__dict__.values()):
+            single_report = flow.report(drawdown_points=drawdown_points, **kwargs).T
+            single_report.columns = single_report.loc["Parameter"]
+            single_report.columns.name = ""
+            single_report.drop("Parameter", inplace=True)
+            if i == 0:
+                single_report = single_report.reindex(["Unit", "Value"])
+            else:
+                single_report.drop("Unit", inplace=True)
+            reports.append(single_report)
+        fullreport = pd.concat(reports).reset_index(drop=True)
+        return fullreport.rename(index={0: "Units"})
+
+
+class PitFlowCommonUnitsCollection(PitFlowCollection):
+    def __init__(self, **kwargs):
+        super().__init__(self, flowclass=PitFlowCommonUnits, **kwargs)
+
+
 def get_nice_intervals(end, num_bounds=(4, 8)):
     """Return rounded intervals from 0 to `end`."""
     mag = np.floor(np.log10(end))
@@ -417,13 +517,3 @@ def unit_convert(df, unit_from, unit_to, coef, unit_col="Unit", value_col="Value
         unit_from, unit_to
     )
     return df
-
-
-testpit = PitFlow(
-    drawdown_stab=6,
-    area=40 * 100,
-    recharge=761 / (1000 * 365.25 * 24 * 60 * 60) * 0.1,
-    precipitation=761 / (1000 * 365.25 * 24 * 60 * 60),
-    cond_h=20 / (24 * 60 * 60),
-)
-print(testpit.report(volume="l"))
