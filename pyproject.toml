@@ -1,6 +1,6 @@
 [project]
 name = "groundwater-tools"
-version = "0.1.0"
+version = "0.2.0"
 description = "Library for processing groundwater data and constructing simple analytical models."
 authors = [{ name = "Kaarel Mänd", email = "kaarel.mand@protonmail.com" }]
 readme = "README.md"
