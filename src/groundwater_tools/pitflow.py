@@ -17,10 +17,90 @@ M3_TO_L = 1000
 
 
 class PitFlow:
-    """All parameters are expected to be in meters and seconds.
-    anisotropy defaults to 1 (i.e. sandstone), limestones can be 0.1. Only used for
-        calculating bottom flow, in any case.
-    h_edge=0 is conservative, hence default.
+    """
+    The PitFlow class provides methods for modeling steady-state
+    groundwater inflow into a cylindrical open pit, based on an
+    analytical radial groundwater flow approach described by Marinelli &
+    Niccoli (2000). The model is reliant on the Dupuit & Forchheimer
+    assumption (no vertical flow) and assumes a horizontally infinite
+    and isotropic environment (also vertically infinite when using
+    inflow from the bottom, but having horizontal vs. vertical isotropy
+    in conductivity).
+
+    The class provides methods to estimate groundwater inflow rates,
+    radii of influence and drawdown profiles for open pits (e.g.
+    quarries).
+
+    All parameters are expected to be in meters and seconds.
+
+    Parameters
+    ----------
+    drawdown_stab : float
+        Drawdown at the pit edge compared to the natural water table (m,
+        positive number).
+    area : float
+        Area of the cylindrical pit (m^2).
+    recharge : float
+        Areal recharge rate across the whole radius of influence
+        (m/sec).
+    precipitation : float
+        Precipitation rate, used for calculating precipitation-based
+        inflow into pit (m/sec; catchment area is not included for now).
+    cond_h : float
+        Horizontal hydraulic conductivity of the rock (m/sec).
+    anisotropy : float, optional
+        Anisotropy of hydraulic conductivity, here meaning vertical
+        hydraulic conductivity over horizontal (unitless; default is 1;
+        typical rocks and sediments have values <<1).
+    drawdown_edge : float, optional
+        Height of inflow at pit edge, i.e. difference in water level
+        between the bottom of the pit and the rock adjacent to the pit
+        (m; default is 0, i.e. most conservative).
+    depth_pitlake : float, optional
+        Water depth in the pit lake (m; default is 0).
+    period_snow_accumulation : float, optional
+        Duration of snow accumulation in winter used for calculating
+        spring inflow (sec; default is 90 days).
+    period_melting : float, optional
+        Duration of snow melt in spring used for calculating spring
+        inflow (sec, default is 14 days).
+
+    Attributes
+    ----------
+    radius_eff : float
+        Effective (circular) radius of the pit, given the area (m).
+    radius_infl : float
+        Radius of influence (line of 0 water table drawdown) from pit
+        centre (m).
+    radius_infl_from_edge : float
+        Radius of influence from pit edge (m).
+    inflow_zone1 : float
+        Horizontal inflow into pit from zone 1 (pit walls) (m^3/sec).
+    inflow_zone2 : float
+        Vertical inflow into pit from zone 2 (pit bottom) (m^3/sec).
+    inflow_precipitation : float
+        Inflow from precipitation into the pit (m^3/sec).
+    inflow_meltwater : float
+        Inflow from meltwater in spring (m^3/sec).
+
+    Methods
+    -------
+    get_drawdown_at_r(radius_from_wall)
+        Returns drawdown at a specified distance from the pit wall.
+    get_r_at_drawdown(drawdown, x0=10)
+        Returns the radius at which drawdown equals a given threshold.
+    draw_drawdown_curve(ax, line_buffer=(0.15, 1.5), lims=None,
+        **kwargs)
+        Plots the groundwater drawdown curve on a matplotlib axis.
+    report(drawdown_points=None, volume="m^3", rate="sec", sort="False")
+        Returns a convenient pandas DataFrame report of model inputs and
+        outputs.
+
+    References
+    ----------
+    Marinelli, F. and Niccoli, W. (2000). Simple analytical equations
+    for estimating ground water inflow to a mine pit. Ground Water,
+    38(2), 311-314.
     """
 
     _inputs_info = {
@@ -33,23 +113,19 @@ class PitFlow:
         "period_snow_accumulation": ("Duration of snow accumulation in Winter", "sec"),
         "period_melting": ("Duration of snow melt in Spring", "sec"),
         "cond_h": ("Hydraulic conductivity (horizontal)", "m/sec"),
-        "anisotropy": ("Anisotropy of hydraulic conductivity", ""),
+        "anisotropy": (
+            "Anisotropy of hydraulic conductivity (vertical/horizontal)",
+            "",
+        ),
     }
     _outputs_info = {
         "radius_eff": ("Effective radius of pit", "m"),
         "radius_infl": ("Radius of influence from pit centre", "m"),
         "radius_infl_from_edge": ("Radius of influence from pit edge", "m"),
-        "radius_at_1m": ("Radius at drawdown of 1 m, from pit edge", "m"),
         "inflow_zone1": ("Zone 1 inflow", "m^3/sec"),
         "inflow_zone2": ("Zone 2 inflow", "m^3/sec"),
-        "inflow_zones_both": ("Zone 1 and 2 inflow", "m^3/sec"),
         "inflow_precipitation": ("Inflow from precipitation in pit", "m^3/sec"),
-        "inflow_precipitation_zone1": (
-            "Inflow from zone 1 and precipitation in pit",
-            "m^3/sec",
-        ),
         "inflow_meltwater": ("Inflow from meltwater", "m^3/sec"),
-        "inflow_meltwater_zone1": ("Inflow from zone 1 and meltwater", "m^3/sec"),
     }
 
     def __init__(
@@ -77,8 +153,9 @@ class PitFlow:
         self.anisotropy = anisotropy
 
     def _get_marinelli_niccoli_h_0(self, radius_infl):
-        """Marinelli and Niccoli 2000 formula describing horizontal groundwater flow
-        into pit. radius_infl will be correct if return value is 0."""
+        """Marinelli and Niccoli (2000) formula describing horizontal
+        groundwater flow into pit. radius_infl will be correct if return
+        value is 0."""
         radius_infl = radius_infl.item()
         radius_term = (
             radius_infl**2 * np.log(radius_infl / self.radius_eff)
@@ -97,18 +174,19 @@ class PitFlow:
 
     @cached_property
     def radius_infl(self, radius_start=10000):
-        """Find optimum drawdown radius (m) through the Marinelli and Niccoli 2000
-        formula."""
+        """Find optimum drawdown radius (m) through the Marinelli and
+        Niccoli (2000) formula."""
         return optimize.fsolve(func=self._get_marinelli_niccoli_h_0, x0=radius_start)[0]
 
     @cached_property
     def radius_infl_from_edge(self):
-        """Find optimum drawdown radius (m) from the edge of the pit, not the center."""
+        """Find optimum drawdown radius (m) from the edge of the pit,
+        not the center."""
         return self.radius_infl - self.radius_eff
 
     def get_drawdown_at_r(self, radius_from_wall):
-        """Return drawdown at length `radius_from_wall` according to Marinelli &
-        Niccoli (2000)."""
+        """Return drawdown at length `radius_from_wall` according to
+        Marinelli & Niccoli (2000)."""
         if radius_from_wall < 0:
             return self.drawdown_stab
         elif radius_from_wall > self.radius_infl_from_edge:
@@ -125,12 +203,13 @@ class PitFlow:
             return self.drawdown_stab - sqrt_term
 
     def _balance_drawdown_threshold(self, radius_from_wall, threshold=1):
-        """Helper function to find radius where drawdown is at threshold."""
+        """Helper function to find radius where drawdown is at
+        threshold."""
         return self.get_drawdown_at_r(radius_from_wall[0]) - threshold
 
     def get_r_at_drawdown(self, drawdown, x0=10):
         """Return radius at which drawdown equals given threshold.
-        Unfortunately, has to be iterative as analytical solution is tough."""
+        Needs to be solved iteratively."""
         return optimize.fsolve(
             func=self._balance_drawdown_threshold,
             x0=x0,
@@ -138,18 +217,15 @@ class PitFlow:
         )[0]
 
     @cached_property
-    def radius_at_1m(self):
-        """Radius from wall at which estimated water table drawdown is 1 m."""
-        return self.get_r_at_drawdown(1)
-
-    @cached_property
     def inflow_zone1(self):
-        """Horizontal inflow into pit from zone 1, i.e. pit walls (m^3/s)."""
+        """Horizontal inflow into pit from zone 1, i.e. pit walls
+        (m^3/s)."""
         return self.recharge * np.pi * (self.radius_infl**2 - self.radius_eff**2)
 
     @cached_property
     def inflow_zone2(self):
-        """Vertical inflow into pit from zone 2, i.e. pit bottom (m^3/sec)."""
+        """Vertical inflow into pit from zone 2, i.e. pit bottom
+        (m^3/sec)."""
         anisotropy_term = np.sqrt(self.cond_h / (self.cond_h * self.anisotropy))
         return (
             4
@@ -160,23 +236,9 @@ class PitFlow:
 
     # TODO: test
     @cached_property
-    def inflow_zones_both(self):
-        """Combined inflow into pit from zones 1 and 2, i.e. pit walls and bottom
-        (m^3/sec)."""
-        return self.inflow_zone1 + self.inflow_zone2
-
-    # TODO: test
-    @cached_property
     def inflow_precipitation(self):
         """Inflow from precipitation into the pit (m^3/sec)."""
         return self.precipitation * self.area
-
-    # TODO: test
-    @cached_property
-    def inflow_precipitation_zone1(self):
-        """Inflow from precipitation into the pit and zone 1, i.e. pit walls
-        (m^3/sec)."""
-        return self.inflow_precipitation + self.inflow_zone1
 
     # TODO: test
     @cached_property
@@ -189,26 +251,24 @@ class PitFlow:
             * self.area
         )
 
-    # TODO: test
-    @cached_property
-    def inflow_meltwater_zone1(self):
-        """Inflow from meltwater in spring and zone 1, i.e. pit walls (m^3/sec)."""
-        return self.inflow_meltwater + self.inflow_zone1
-
     def draw_drawdown_curve(self, ax, line_buffer=(0.15, 1.5), lims=None, **kwargs):
-        """Draw the groundwater drawdown curve on an existing matplotlib axes.
+        """Draw the groundwater drawdown curve on an existing matplotlib
+        axes.
 
         Args:
-            ax (matplotlib.axes.Axes): Matplotlib axes on which to draw the curve.
-            line_buffer (tuple, optional): Tuple stating how far to extend the curve
-                back from the pit wall and forward past the radius of influence, as
-                relative to the radius of influence. Defaults to (0.15, 1.5).
-            lims (tuple or None, optional): If present, a tuple that overrides
-                `line_buffer` with absolute values. Defaults to None.
+            ax (matplotlib.axes.Axes): Matplotlib axes on which to draw
+                the curve.
+            line_buffer (tuple, optional): Tuple stating how far to
+                extend the curve back from the pit wall and forward past
+                the radius of influence, as relative to the radius of
+                influence. Defaults to (0.15, 1.5).
+            lims (tuple or None, optional): If present, a tuple that
+                overrides `line_buffer` with absolute values. Defaults
+                to None.
 
         Returns:
-            list of matplotlib.lines.Line2D: a list of lines on the specified matplotlib
-                axes.
+            list of matplotlib.lines.Line2D: a list of lines on the
+                specified matplotlib axes.
         """
         if not lims:
             lims = (
@@ -219,10 +279,44 @@ class PitFlow:
         drawdowns = [self.get_drawdown_at_r(r) for r in radii]
         return ax.plot(radii, drawdowns, **kwargs)
 
+    # TODO: add radii where drawdown is 0.5 and 1 m
     # TODO: test conversions
-    def report(self, drawdown_points=None, volume="m^3", rate="sec", sort="False"):
-        """pandas.DataFrame report of model inputs and commonly-needed model
-        outputs."""
+    def report(
+        self,
+        drawdown_distances=None,
+        drawdown_depths=[0.5, 1],
+        volume="m^3",
+        rate="sec",
+    ):
+        """
+        Generates a pandas DataFrame report of model inputs and
+        commonly-needed model outputs.
+
+        Parameters:
+            drawdown_distances (list or None, optional): List of
+                distances (in meters) from the pit wall at which to
+                report drawdown values. If None, uses automatically
+                generated intervals based on the model's radius of
+                influence.
+            drawdown_depths (list, optional): List of drawdown depths
+                (in meters) for which to calculate the corresponding
+                radii. Defaults to [0.5, 1].
+            volume (str, optional): Unit for volume values in the
+                report. Must be either 'm^3' (default) or 'l' (liters).
+            rate (str, optional): Unit for time-based rates in the
+                report. Must be one of 'sec' (default), 'hr', 'day',
+                'quarter', or 'yr'.
+
+        Returns:
+            pandas.DataFrame: A DataFrame containing model parameters,
+                their values, and units, including drawdown at specified
+                distances, radii at specified drawdown depths, and
+                combinations of inflow terms.
+
+        Raises:
+            ValueError: If an unrecognized value is provided for
+                `volume` or `rate`.
+        """
         report_table = (
             pd.DataFrame(self._inputs_info | self._outputs_info)
             .T.reset_index()[[0, "index", 1]]
@@ -230,20 +324,72 @@ class PitFlow:
         )
         report_table["Value"] = report_table["Value"].apply(lambda x: getattr(self, x))
 
-        if drawdown_points is None:
-            drawdown_points = get_nice_intervals(self.radius_infl_from_edge)
-        drawdown_rows = pd.DataFrame(
+        # Combinations of inflow terms
+        combination_rows = pd.DataFrame(
+            (
+                [
+                    "Inflow from zones 1 and 2",
+                    self.inflow_zone1 + self.inflow_zone2,
+                    "m^3/sec",
+                ],
+                [
+                    "Inflow from zone 1 and precipitation",
+                    self.inflow_zone1 + self.inflow_precipitation,
+                    "m^3/sec",
+                ],
+                [
+                    "Inflow from zone 1, 2, and precipitation",
+                    self.inflow_zone1 + self.inflow_zone2 + self.inflow_precipitation,
+                    "m^3/sec",
+                ],
+                [
+                    "Inflow from zone 1 and meltwater",
+                    self.inflow_zone1 + self.inflow_meltwater,
+                    "m^3/sec",
+                ],
+                [
+                    "Inflow from zones 1, 2, and meltwater",
+                    self.inflow_zone1 + self.inflow_zone2 + self.inflow_meltwater,
+                    "m^3/sec",
+                ],
+            ),
+            columns=["Parameter", "Value", "Unit"],
+        )
+        report_table = pd.concat([report_table, combination_rows]).reset_index(drop=True)
+
+        # Drawdown at specified distances from pit wall
+        if drawdown_distances is None:
+            drawdown_distances = get_nice_intervals(self.radius_infl_from_edge)
+        drawdown_dist_rows = pd.DataFrame(
             (
                 [
                     f"Drawdown at {point} m from pit wall",
                     self.get_drawdown_at_r(point),
                     "m",
                 ]
-                for point in drawdown_points
+                for point in drawdown_distances
             ),
             columns=["Parameter", "Value", "Unit"],
         )
-        report_table = pd.concat([report_table, drawdown_rows]).reset_index(drop=True)
+        report_table = pd.concat([report_table, drawdown_dist_rows]).reset_index(
+            drop=True
+        )
+
+        # Radii at specified drawdown depths
+        drawdown_radii_rows = pd.DataFrame(
+            (
+                [
+                    f"Radius from pit wall with drawdown of {depth} m",
+                    self.get_r_at_drawdown(depth),
+                    "m",
+                ]
+                for depth in drawdown_depths
+            ),
+            columns=["Parameter", "Value", "Unit"],
+        )
+        report_table = pd.concat([report_table, drawdown_radii_rows]).reset_index(
+            drop=True
+        )
 
         if volume == "m^3":
             pass
@@ -291,8 +437,7 @@ class PitFlow:
 
     def _repr_html_(self):
         fmt_output = (
-            '<table border="1">'
-            f'<tr><th colspan="3">{self.__class__.__name__}</th></tr>'
+            f'<table border="1"><tr><th colspan="3">{self.__class__.__name__}</th></tr>'
         )
         for param, (name, unit) in self._inputs_info.items():
             fmt_output += (
@@ -303,6 +448,8 @@ class PitFlow:
         return fmt_output + "</table>"
 
 
+# TODO: move parameters into PitFlow? if any present, ignore original parameter and
+#   convert internally. Needs different handling to require one of two params.
 class PitFlowCommonUnits(PitFlow):
     """Same as PitFlow but expects input in more convenient forms:
     `recharge_mm_yr` in mm/yr
@@ -382,14 +529,17 @@ class PitFlowCommonUnits(PitFlow):
 class PitFlowCollection(MutableMapping):
     """Methods to show and collect different drawdown scenarios.
     Pass any of the parameters needed for PitFlow as either a
-    list of parameters or a single numerical parameter. A PitFlow instance is added per
-    each item in the product of all lists. Returns a dict-like PitFlowCollection
-    object, where names are attributes that change."""
+    list of parameters or a single numerical parameter. A PitFlow
+    instance is added per each item in the product of all lists. Returns
+    a dict-like PitFlowCollection object, where names are attributes
+    that change."""
 
     def __init__(self, flowclass=PitFlow, **kwargs):
         multiples = {}
         singles = {}
         for name, val in kwargs.items():
+            # TODO: use collections.abc.sequence and np.ndarray to allow more types
+            # https://stackoverflow.com/questions/16807011/python-how-to-identify-if-a-variable-is-an-array-or-a-scalar
             if type(val) is list:
                 multiples[name] = val
             else:
@@ -403,7 +553,8 @@ class PitFlowCollection(MutableMapping):
             self.__dict__[flow_name] = flowclass(**instance_params, **singles)
 
     def __setitem__(self, key, value):
-        if type(value) != PitFlow:
+        # TODO: test this
+        if type(value) is not PitFlow:
             raise TypeError(
                 f"Attempted to set a `{type(value)}` as value."
                 "Values must be of type `PitFlow`."
@@ -448,16 +599,18 @@ class PitFlowCollection(MutableMapping):
         ax.set_ylabel(ylabel)
         return fig, ax
 
-    def report(self, drawdown_points=None, **kwargs):
-        if drawdown_points is None:
+    def report(self, drawdown_distances=None, **kwargs):
+        if drawdown_distances is None:
             max_infl = max(
                 flow.radius_infl_from_edge for flow in self.__dict__.values()
             )
-            drawdown_points = get_nice_intervals(max_infl)
+            drawdown_distances = get_nice_intervals(max_infl)
 
         reports = []
         for i, flow in enumerate(self.__dict__.values()):
-            single_report = flow.report(drawdown_points=drawdown_points, **kwargs).T
+            single_report = flow.report(
+                drawdown_distances=drawdown_distances, **kwargs
+            ).T
             single_report.columns = single_report.loc["Parameter"]
             single_report.columns.name = ""
             single_report.drop("Parameter", inplace=True)
@@ -505,8 +658,10 @@ def unit_convert(df, unit_from, unit_to, coef, unit_col="Unit", value_col="Value
         unit_from (str): unit as exists in the DataFrame.
         unit_to (str): unit to be converted to.
         coef (float, int): conversion factor.
-        unit_col (str, optional): Column name that stores units. Defaults to "Unit".
-        value_col (str, optional): Column name that stores values. Defaults to "Value".
+        unit_col (str, optional): Column name that stores units.
+            Defaults to "Unit".
+        value_col (str, optional): Column name that stores values.
+            Defaults to "Value".
 
     Returns:
         pd.DataFrame: DataFrame with converted values.

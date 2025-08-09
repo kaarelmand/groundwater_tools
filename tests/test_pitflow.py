@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 import math
 
-from src.groundwater_tools.marinelli import (
+from groundwater_tools.pitflow import (
     PitFlow,
     PitFlowCommonUnits,
     get_nice_intervals,
@@ -42,7 +42,7 @@ def testpit_commonunits():
         precipitation_mm_yr=761,
     )
 
-
+# TODO: parametrize all tests with several values
 def test_radius_infl(testpit):
     assert math.isclose(testpit.radius_infl, 1088.212649, rel_tol=1e-6)
 
@@ -60,7 +60,7 @@ def test_get_drawdown_at_r_1100(testpit):
 
 
 def test_get_r_at_drawdown(testpit):
-    assert math.isclose(testpit.radius_at_1m, 244.000377, rel_tol=1e-6)
+    assert math.isclose(testpit.get_r_at_drawdown(1), 244.000377, rel_tol=1e-6)
 
 
 def test_inflow_zone1(testpit):
