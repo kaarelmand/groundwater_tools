@@ -625,7 +625,7 @@ class PitFlowCollection(MutableMapping):
 
 class PitFlowCommonUnitsCollection(PitFlowCollection):
     def __init__(self, **kwargs):
-        super().__init__(self, flowclass=PitFlowCommonUnits, **kwargs)
+        super().__init__(flowclass=PitFlowCommonUnits, **kwargs)
 
 
 def get_nice_intervals(end, num_bounds=(4, 8)):
