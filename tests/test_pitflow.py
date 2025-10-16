@@ -5,6 +5,7 @@ import math
 from groundwater_tools.pitflow import (
     PitFlow,
     PitFlowCommonUnits,
+    PitFlowCommonUnitsCollection,
     get_nice_intervals,
 )
 
@@ -42,6 +43,18 @@ def testpit_commonunits():
         precipitation_mm_yr=761,
     )
 
+
+@pytest.fixture
+def testpitcollection_commonunits():
+    return PitFlowCommonUnitsCollection(
+        drawdown_stab=6,
+        cond_h_md=[10, 20],
+        area=40 * 100,
+        recharge_mm_yr=761 * 0.1,
+        precipitation_mm_yr=761,
+    )
+
+
 # TODO: parametrize all tests with several values
 def test_radius_infl(testpit):
     assert math.isclose(testpit.radius_infl, 1088.212649, rel_tol=1e-6)
@@ -73,6 +86,12 @@ def test_inflow_zone2(testpit_anisotropic):
 
 def test_radius_infl_commonunits(testpit_commonunits):
     assert math.isclose(testpit_commonunits.radius_infl, 1088.212649)
+
+
+def test_radius_infl_commonunits_collection(testpitcollection_commonunits):
+    assert math.isclose(
+        testpitcollection_commonunits["cond_h_md = 20"].radius_infl, 1088.212649
+    )
 
 
 def test_get_nice_intervals():
